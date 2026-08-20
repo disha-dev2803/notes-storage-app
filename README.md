@@ -30,7 +30,6 @@ This project was developed to strengthen my understanding of HTML, CSS, JavaScri
 
 ## Future Improvements
 
-- Add search functionality
 - Add categories or tags
 - Add dark mode
 - Improve animations and UI
