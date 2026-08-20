@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Notex-the notes storer</title>
+  <style>
+    :root{
+      --bg:#f4f6fb; --card-shadow: 0 6px 18px rgba(20,24,40,0.08);
+      --accent:#5b6cff;
+      font-family: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);padding:28px;color:#111}
+
+    /* Splash screen */
+    #splash {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: #fdf6e3;
+      display: flex; justify-content: center; align-items: center;
+      flex-direction: column;
+      z-index: 1000;
+      transition: opacity 1s ease;
+    }
+    #splash h1 {
+      font-size: 3rem; color: #333;
+      opacity: 0; transform: translateY(50px);
+      transition: all 1s ease;
+    }
+    #splash.show h1 {opacity: 1; transform: translateY(0)}
+
+    /* App container (hidden until splash ends) */
+    #appContainer {display:none}
+
+    .app{max-width:1100px;margin:0 auto}
+    header{display:flex;gap:12px;align-items:center;justify-content:space-between;margin-bottom:18px}
+    header h1{font-size:20px;margin:0}
+    .controls{display:flex;gap:8px;align-items:center}
+    input[type=text], textarea{font-family:inherit}
+
+    .new-note{background:#fff;padding:14px;border-radius:12px;box-shadow:var(--card-shadow);display:flex;gap:12px;align-items:start}
+    .new-note .left{flex:1}
+    .new-note textarea{width:100%;min-height:70px;border:1px solid #e6e9f2;border-radius:8px;padding:10px;resize:vertical}
+    .new-note .right{display:flex;flex-direction:column;gap:8px;align-items:flex-end}
+    .btn{padding:8px 12px;border-radius:8px;border:0;background:var(--accent);color:#fff;cursor:pointer}
+    .btn.ghost{background:transparent;color:var(--accent);border:1px solid rgba(91,108,255,0.12)}
+    .palette{display:flex;gap:6px}
+    .color-swatch{width:28px;height:28px;border-radius:6px;cursor:pointer;border:2px solid rgba(0,0,0,0.06)}
+
+    .notes-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px;margin-top:18px}
+    .note{background:#fff;border-radius:12px;box-shadow:var(--card-shadow);padding:12px;position:relative;min-height:120px;display:flex;flex-direction:column;gap:8px}
+    .note .meta{display:flex;justify-content:space-between;align-items:center}
+    .note .content{white-space:pre-wrap;flex:1;overflow:auto}
+    .note .actions{display:flex;gap:8px}
+    .icon-btn{background:transparent;border:0;padding:6px;border-radius:8px;cursor:pointer}
+    .empty{padding:22px;text-align:center;color:#666}
+    footer{margin-top:18px;text-align:center;color:#666}
+
+    @media(max-width:520px){
+      body{padding:14px}
+      .new-note{flex-direction:column}
+      .new-note .right{align-items:stretch}
+    }
+  </style>
+</head>
+<body>
+  <!-- Splash screen -->
+  <div id="splash">
+    <h1><b>📒 NOTEX</b></h1>
+  </div>
+
+  <!-- Notes App -->
+  <div id="appContainer">
+    <div class="app">
+      <header>
+        <h1>Notes App</h1>
+        <div class="controls">
+          <input id="search" type="text" placeholder="Search notes..." />
+        </div>
+      </header>
+
+      <section class="new-note" aria-label="Create new note">
+        <div class="left">
+          <textarea id="noteText" placeholder="Write a new note..."></textarea>
+          <div style="margin-top:8px;display:flex;align-items:center;gap:8px">
+            <input id="noteTitle" type="text" placeholder="Optional title" style="flex:1;padding:8px;border-radius:8px;border:1px solid #e6e9f2" />
+          </div>
+        </div>
+        <div class="right">
+          <div style="font-size:13px;color:#444">Choose color</div>
+          <div class="palette" id="newPalette"></div>
+          <div style="display:flex;gap:8px">
+            <button class="btn" id="addBtn">Add note</button>
+            <button class="btn ghost" id="clearBtn">Clear</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="notes-grid" id="notesGrid" aria-live="polite"></section>
+      <div class="empty" id="emptyState" style="display:none">No notes yet — add your first note!</div>
+      <footer>Notes are stored locally in your browser using <strong>localStorage</strong>.</footer>
+    </div>
+
+    <template id="noteTemplate">
+      <article class="note">
+        <div class="meta">
+          <strong class="title"></strong>
+          <div class="actions">
+            <button class="icon-btn edit">✏</button>
+            <button class="icon-btn color">🎨</button>
+            <button class="icon-btn delete">🗑</button>
+          </div>
+        </div>
+        <div class="content"></div>
+        <small class="time"></small>
+      </article>
+    </template>
+  </div>
+
+  <script>
+    // --- Splash screen ---
+    window.addEventListener("load", () => {
+      const splash = document.getElementById("splash");
+      const title = splash.querySelector("h1");
+      const appContainer = document.getElementById("appContainer");
+
+      setTimeout(() => { splash.classList.add("show"); }, 300);
+      setTimeout(() => { splash.style.opacity = "0"; }, 2000);
+      setTimeout(() => {
+        splash.style.display = "none";
+        appContainer.style.display = "block";
+      }, 3000);
+    });
+
+    // --- Notes App logic ---
+    const STORAGE_KEY = 'notesApp.notes.v1';
+    const defaultColors = ['#fff7b2','#ffd6c4','#dbeafe','#c7f9cc','#fde2b6','#f8d3ff','#e6f7ff','#ffffff'];
+
+    const noteText = document.getElementById('noteText');
+    const noteTitle = document.getElementById('noteTitle');
+    const addBtn = document.getElementById('addBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const newPalette = document.getElementById('newPalette');
+    const notesGrid = document.getElementById('notesGrid');
+    const emptyState = document.getElementById('emptyState');
+    const searchInput = document.getElementById('search');
+    const noteTemplate = document.getElementById('noteTemplate');
+
+    let notes = [];
+    let newNoteColor = defaultColors[0];
+
+    function uid(){return Date.now().toString(36) + Math.random().toString(36).slice(2,7)}
+    function load(){try{notes = JSON.parse(localStorage.getItem(STORAGE_KEY)) || []}catch{notes=[]}}
+    function save(){localStorage.setItem(STORAGE_KEY, JSON.stringify(notes))}
+
+    function render(filter=''){
+      notesGrid.innerHTML = '';
+      const filtered = notes.filter(n => ((n.title||'') + ' ' + (n.text||'')).toLowerCase().includes(filter.toLowerCase()))
+                            .sort((a,b)=> b.updatedAt - a.updatedAt);
+
+      if(!filtered.length){emptyState.style.display='block';return}
+      emptyState.style.display='none';
+
+      for(const n of filtered){
+        const node = noteTemplate.content.cloneNode(true);
+        const article = node.querySelector('.note');
+        article.style.background = n.color || '#fff';
+        node.querySelector('.title').textContent = n.title || '';
+        node.querySelector('.content').textContent = n.text || '';
+        node.querySelector('.time').textContent = new Date(n.updatedAt).toLocaleString();
+
+        node.querySelector('.edit').addEventListener('click', ()=> openEditor(n.id));
+        node.querySelector('.delete').addEventListener('click', ()=> deleteNote(n.id));
+        node.querySelector('.color').addEventListener('click', ()=> showColorPicker(n.id, article));
+        notesGrid.appendChild(node);
+      }
+    }
+
+    function addNote(){
+      const text = noteText.value.trim();
+      const title = noteTitle.value.trim();
+      if(!text && !title){ alert('Please write a title or some text'); return }
+      const now = Date.now();
+      notes.push({ id: uid(), title, text, color: newNoteColor, createdAt: now, updatedAt: now });
+      save(); render(searchInput.value);
+      noteText.value=''; noteTitle.value='';
+    }
+    function deleteNote(id){ if(confirm('Delete this note?')){notes=notes.filter(n=>n.id!==id); save(); render(searchInput.value)} }
+    function openEditor(id){
+      const n=notes.find(x=>x.id===id); if(!n) return;
+      const newTitle=prompt('Edit title', n.title)??n.title;
+      const newText=prompt('Edit note text', n.text)??n.text;
+      n.title=newTitle; n.text=newText; n.updatedAt=Date.now();
+      save(); render(searchInput.value);
+    }
+    function showColorPicker(id, article){
+      const existing=document.getElementById('palette-popup'); if(existing) existing.remove();
+      const popup=document.createElement('div'); popup.id='palette-popup';
+      popup.style.position='absolute'; popup.style.display='flex'; popup.style.gap='6px'; popup.style.padding='8px';
+      popup.style.borderRadius='8px'; popup.style.boxShadow='0 8px 30px rgba(0,0,0,0.12)'; popup.style.background='#fff';
+      for(const c of defaultColors){ const sw=document.createElement('button'); sw.className='color-swatch'; sw.style.background=c;
+        sw.addEventListener('click',()=>{setNoteColor(id,c); popup.remove()}); popup.appendChild(sw);}
+      document.body.appendChild(popup);
+      const rect=article.getBoundingClientRect(); popup.style.left=(rect.right- popup.offsetWidth-8)+'px'; popup.style.top=(window.scrollY+rect.top- popup.offsetHeight-8)+'px';
+      setTimeout(()=>{window.addEventListener('click', onClickOutside)},10);
+      function onClickOutside(e){if(!popup.contains(e.target)){popup.remove(); window.removeEventListener('click', onClickOutside)}}
+    }
+    function setNoteColor(id,c){const n=notes.find(x=>x.id===id); if(!n) return; n.color=c; n.updatedAt=Date.now(); save(); render(searchInput.value)}
+    function buildNewPalette(container){
+      container.innerHTML=''; defaultColors.forEach((c,i)=>{const sw=document.createElement('button'); sw.className='color-swatch'; sw.style.background=c;
+        sw.addEventListener('click',()=>{newNoteColor=c; document.querySelectorAll('#newPalette .color-swatch').forEach(b=>b.style.outline='none'); sw.style.outline='3px solid rgba(0,0,0,0.06)'}); container.appendChild(sw); if(i===0) sw.style.outline='3px solid rgba(0,0,0,0.06)'})}
+
+    addBtn.addEventListener('click', addNote);
+    clearBtn.addEventListener('click', ()=>{noteText.value=''; noteTitle.value=''});
+    document.addEventListener('keydown', e=>{if(e.key==='Enter'&&(e.metaKey||e.ctrlKey)) addNote()});
+    searchInput.addEventListener('input', ()=>render(searchInput.value));
+
+    buildNewPalette(newPalette); load(); render();
+  </script>
+</body>
+</html>
